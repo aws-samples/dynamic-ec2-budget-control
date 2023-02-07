@@ -1,20 +1,12 @@
 # Dynamic EC2 budget control
 
-**Trademark notices:**
-Altair®, PBS® and OpenPBS® are trademarks or registered trademarks of Altair Engineering.
-Slurm® and SchedMD® are registered trademarks of SchedMD LLC.
-IBM® Platform® LSF® are trademarks or registered trademarks of International Business Machines Corporation in the United States and other countries.
-
 # Summary
 
-HPC customers might want to add a dynamic control of their business units (BU) EC2 compute budgets.
-A service like [AWS Budgets](https://aws.amazon.com/aws-cost-management/aws-budgets/) might be too coarse-grained, i.e. not have the necessary insights to track usage and costs details up to each single HPC job, lack flexibility or prompt adaptation to the cluster load.
+The solution presented in this post aims to enable a **dynamic EC2 cores allocation limit for each business unit** (BU), automatically adapted according to a past time frame (e.g. one week) spending, that can be adapted anytime according to workload spikes or priorities.
 
-The solution presented aims to have a **dynamic EC2 cores allocation limit for each business unit** (BU), automatically adapted according to a past time frame (e.g. one week) spending. 
+**EC2 cores allocation limit is enforced in the HPC workload scheduler itself, with the use of its dynamic resources.** HPC **jobs breaking the limit will be kept in queue/pending** status until more cores are released by completed, older jobs. With this approach, a related job pending reason is also provided to both business or job owners, making them aware of their spending implications.
 
-**EC2 cores allocation limit is enforced in the HPC workload scheduler itself, with the use of its dynamic resources.** HPC **jobs breaking the limit will be kept in queue/pending** status until more cores are released by completed, older jobs. Pending reason is also provided by the scheduler, so both business or job owners are aware of the situation.
-
-**Focus is on real EC2 cores** instead of vCPUs, because most HPC applications run better with hyperthreading disabled. HPC users are more familiar with the core concept too.
+**Focus is on real EC2 cores** instead of vCPUs, because most HPC applications run better with hyperthreading disabled. HPC users are more familiar with the core/CPU concept too.
 
 # Overview of the solution
 
@@ -118,7 +110,7 @@ In this example:
 
 ## Code
 
-Budget control code is available on this AWS Samples repository (under approval). It’s made up of the following files. All of them must be present and accessible on the scheduler headnode:
+Budget control code is made up of the following files. All of them must be present and accessible on the scheduler headnode:
 
 * ***budget.control.conf***
     This configuration file saves the current budget assigned to each BU. File format is:
@@ -131,9 +123,6 @@ Budget control code is available on this AWS Samples repository (under approval)
     This file must be run on a regular basis on the headnode by e.g. cron daemon.
     Every time it runs it appends a new line in *budget.control.csv* file, and this line will be used by the scheduler dynamic resource described below to provide the available cores for each BU job.
     Log file: */var/log/budget.control.updater.log*
-* ***budget.control.dyn_res.sh <BU>***
-    This script sample can be used for by schedulers such as  Altair® PBS Professional®, OpenPBS® or IBM® Platform® LSF®, to provide the currently available cores for HPC jobs belonging to Business Unit BU, with BU identifier/label entered as command line parameter. This script must be configured as a *scheduler dynamic resource*, so it can be regularly invoked by the scheduler server daemon on the headnode. *With SchedMD SLURM® scheduler it’s not needed.*
-    Log file: */var/log/budget.control.dyn_res.log*
 
 ***budget.control.csv*** file will be created and updated in the same folder, and it will contain the data about each BU last week costs, budget and calculated cores limit.
 
@@ -159,10 +148,9 @@ To enable dynamic budget control, proceed in this way:
 1. **Enable one selected Business Unit Tag in AWS Billing → Cost allocation tags**. (e.g. `BusinessUnit` tag) By performing this operation, AWS Cost Explorer starts collecting data about BU usage. Collected data is available from next day onward.
 2. **Make sure headnode has the required IAM policies** described above in its role/profile to be able to query Cost Explorer.
 3. **In the headnode, place Budget Control solution scripts and its configuration file in a location reachable by the HPC scheduler server process** (runs as root). They all must be placed in the same location. Please check the execution bits for .sh scripts.
-    e.g. */opt/pbs/budget.control
+    e.g. */opt/slurm/budget.control
     budget.control.conf
     budget.control.updater.sh
-    budget.control.dyn_res.sh (only if using Altair® PBS Professional®, OpenPBS®)
     *
 4. **Adapt/update script parameters in *budget.control.updater.sh*:
     **
@@ -170,40 +158,17 @@ To enable dynamic budget control, proceed in this way:
         e.g. `BU_INSTANCE_TAG="BusinessUnit"`
     2. **Retrieve or update the approximated single core weekly cost** from AWS https://aws.amazon.com/ec2/pricing or utility sites like [https://instances.vantage.sh](https://instances.vantage.sh/). You can select the reference instance type (e.g. `r5`) and check what’s the weekly price of 2 vCPUs. As a quick pickup, you can take the smaller instance size (`r5.large`). Set this value as `SINGLE_CORE_WEEKLY_COST`
         e.g. `SINGLE_CORE_WEEKLY_COST=23.6880  # r5.large weekly on-demand cost`
-5. **Adapt/update script parameters in *budget.control.dyn_res.sh*** (only if using Altair® PBS Professional®, OpenPBS®):
-    1. **Set the Business Unit tag key** as value for `BU_INSTANCE_TAG`
-6. **Fill budges for each BU in *budget.control.conf***, using format 
+5. **Fill budges for each BU in *budget.control.conf***, using format 
     `<BU>,<Budget>`
     e.g.`
     BU1,1000
     BU2,2000
     BU3,3000`
-7. **Add a cron task to execute *budget.control.updater.sh* (or *budget.control.updater.slurm.sh)* every week** at e.g. Sunday 00:00:
+6. **Add a cron task to execute *budget.control.updater.slurm.sh* every week** at e.g. Sunday 00:00:
     `cat > /tmp/budget.control.cron << EOF
-    00 00 * * 0    /opt/pbs/budget.control/budget.control.updater.sh
+    00 00 * * 0    /opt/slurm/budget.control/budget.control.updater.sh
     EOF
     crontab /tmp/budget.control.cron`
-
-## Additional steps for Altair® PBS Professional®, OpenPBS® 
-
-**Configure the available cores counter as Altair® PBS Professional®, OpenPBS® dynamic resource for each BU**. And link that resource to *budget.control.dyn_res.sh* script. *budget.control.dyn_res.sh* takes the target business unit id/label as command line parameter. ** E.g.
-
-```
-# add new dynamic resources
-qmgr -c "create resource bu1_cores type=long"
-qmgr -c "create resource bu2_cores type=long"
-qmgr -c "create resource bu3_cores type=long"
-
-# PBS_HOME/sched_priv/sched_config, add:
-resources: [...], bu1_cores, bu2_cores, bu3_cores
-
-# and at the end:
-server_dyn_res: "bu1_cores  !/opt/pbs/budget.control/budget.control.dyn_res.sh BU1"
-server_dyn_res: "bu2_cores  !/opt/pbs/budget.control/budget.control.dyn_res.sh BU2"
-server_dyn_res: "bu3_cores  !/opt/pbs/budget.control/budget.control.dyn_res.sh BU3"
-
-systemctl restart pbs
-```
 
 ## Additional steps for SLURM®/ParallelCluster
 
@@ -217,80 +182,6 @@ So the only step for setting up budget control in SLURM® is to set weekly cron 
 ## Test
 
 Last step to enable budget control, is for each HPC job to request the cores it needs to their owner BU pool.
-
-### Altair® PBS Professional®, OpenPBS® 
-
-To make use of the budget dynamic resources, jobs of a certain business unit BU1, requesting n cores, must add the following resource requirement string: 
-
-```
--l bu1_cores=n
-```
-
-**Full example**
-Given the number of currently available cores for BU1 jobs are:
-
-```
-$ /opt/pbs/budget.control/budget.control.dyn_res.sh BU1
-39
-```
-
-and a new job coming from an user of BU1 is requesting 48 cores, that job must be submitted with:
-
-```
-$ qsub -q parallel -N myjob -l bu1_cores=48 jobscript.sh
-7.ip-10-0-10-99
-```
-
-in this case Altair® PBS Professional®, OpenPBS® keeps the job in pending until more `bu1_cores` are freed:
-
-```
-$ qstat -f 7
-Job Id: 7.ip-10-0-10-99
-    Job_Name = myjob
-    Job_Owner = myuser@ip-10-0-10-99.eu-west-1.compute.internal
-    job_state = Q
-    queue = parallel
-    server = ip-10-0-10-99.eu-west-1.compute.internal
-    Checkpoint = u
-    ctime = Fri Nov 25 08:14:15 2022
-    Error_Path = ip-10-0-10-99.eu-west-1.compute.internal:/home/myuser/j
-        ob2.e7
-    Hold_Types = n
-    Join_Path = n
-    Keep_Files = n
-    Mail_Points = a
-    mtime = Fri Nov 25 08:14:15 2022
-    Output_Path = ip-10-0-10-99.eu-west-1.compute.internal:/home/myuser/
-        job2.o7
-    Priority = 0
-    qtime = Fri Nov 25 08:14:15 2022
-    Rerunable = True
-    Resource_List.bu1_cores = 48
-    Resource_List.ncpus = 48
-    Resource_List.nodect = 1
-    Resource_List.place = pack
-    Resource_List.select = 1:ncpus=48
-    substate = 10
-    Variable_List = PBS_O_HOME=/home/myuser,PBS_O_LANG=en_US.UTF-8,
-        PBS_O_LOGNAME=myuser,
-        PBS_O_PATH=/usr/lib64/qt-3.3/bin:/opt/amazon/openmpi/bin/:/opt/amazon/
-        efa/bin/:/opt/myhpc/bin:/usr/local/sbin:/sbin:/usr/sbin:/usr/bin:/usr/l
-        ocal/bin:/bin:/opt/aws/bin:/root/bin:/opt/pbs/bin:/opt/pbs/sbin:/usr/lo
-        cal/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/pbs/bin:/myhpc/home/efa
-        dmin/.local/bin:/home/myuser/bin,
-        PBS_O_MAIL=/var/spool/mail/myuser,PBS_O_SHELL=/bin/bash,
-        PBS_O_WORKDIR=/home/myuser,PBS_O_SYSTEM=Linux,
-        PBS_O_QUEUE=parallel,
-        PBS_O_HOST=ip-10-0-10-99.eu-west-1.compute.internal
-  comment =  Can  Never  Run:  Insufficient amount of server resource: bu1_cores
-  (R:  48 A:  39 T:  39)
-    etime = Fri Nov 25 08:14:15 2022
-    Submit_arguments = -q parallel -N myjob -l ncpus=48 -l bu1_cores=48 jobscript.sh
-    project = _pbs_project_default
-    Submit_Host = ip-10-0-10-99.eu-west-1.compute.internal
-```
-
-### SLURM®/ParallelCluster
 
 You can check current BU cores limit with SLURM® command:
 
@@ -378,10 +269,11 @@ Proposed logic and solution can be further improved and customized, e.g.:
 
 **Send email notifications in case a daily cost exceeds the budget.** Potentially also have 2 limits, soft and hard). Headnode *sendmail* process can be easily integrated with [AWS Simple Email Service](https://aws.amazon.com/ses/), like described [here](https://docs.aws.amazon.com/ses/latest/dg/send-email-sendmail.html).
 
-**Enforce job submission cores resource requirement**, e.g. using an Altair® PBS Professional®, OpenPBS® hook checking submission command line associated with a `pbs.QUEUEJOB` event, or a SLURM® `PrologSlurmctld`. You can find more details in [PBS hook guide](https://2021.help.altair.com/2021.1.2/PBS%20Professional/PBSHooks2021.1.2.pdf) and [SLURM® prolog and epilog guide](https://slurm.schedmd.com/prolog_epilog.html) respectively.
+**Enforce job submission cores resource requirement**, e.g. using SLURM® `PrologSlurmctld`. You can find more details in [SLURM® prolog and epilog guide](https://slurm.schedmd.com/prolog_epilog.html).
 
 **Retrieve 1-core cost automatically** by querying [AWS Price List Query APIs](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-pelong.html).
 
 **Modify the core logic or timings to better adapt to specific HPC environments**, maybe reacting to costs spikes more promptly, or smooth new limits introduction.
 
 **BU tag, together with others might be enforced and validated** as suggested in [Enforce and validate AWS resource tags](https://aws.amazon.com/blogs/aws-cloud-financial-management/cost-allocation-blog-series-3-enforce-and-validate-aws-resource-tags/) post.
+
