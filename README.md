@@ -104,9 +104,9 @@ In this example:
 
 * **The sum of all BU limits, calculated as vCPU, must not exceed AWS Account EC2 vCPU limit**
 * **A (compute) node that belongs to a certain BU, must have a related tag,** with a specific key e.g. `BusinessUnit` and the BU identifier/name as value. E.g. `BusinessUnit=BU1`
-* **AWS CLI and `jq` commands** must be installed on the headnode to correctly run budget control scripts:
-    https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-    `yum -y install jq`
+* **AWS CLI and `jq` commands** must be installed on the headnode to correctly run budget control scripts. `jq` command is used to correctly and safely parse json data. AWS CLI is used to query Cost Explorer (both AWS CLI version 1 and 2 have been tested successfully):
+    * https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+    * `yum -y install jq` (available in EPEL repository), or more info on http://stedolan.github.io/jq/
 
 ## Code
 
